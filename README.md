@@ -226,6 +226,138 @@ Remember the guiding principle above: solutions are judged on whether they'd
 
 ---
 
+## Reference solution (implemented)
+
+The two required challenges are implemented without changing the organiser's
+`csd/config.py` defaults or reading simulator internals.
+
+### Challenge 1 — training-free, physics-guided pixel detector
+
+`solutions/detection.py` builds a normalized matched-filter bank from the public
+appearance ranges: short dark rectangles, the nominal stick angle and its
+orientation jitter, and the configured blur. Before filtering, it subtracts a
+robust median from each row to suppress the shared horizontal acquisition noise.
+Each zero-sum template compares the putative stick to a local background annulus;
+non-maximum suppression keeps one centre per feature, and the selected blurred
+rectangle footprints form the binary pixel mask. The default threshold is 4
+matched-filter noise units. No generated training images, stick metadata, or
+hidden state are used at inference time.
+
+The detector also estimates the physical dip amplitude by dividing each matched
+response by the selected template's gain. This removes most of the square-root
+area advantage of longer/wider sticks and gives stage 2 an objective closer to
+"maximum interdot contrast" than image standard deviation.
+
+### Challenge 2 — global search, empirical drift correction, local refinement
+
+`solutions/optimization.py` only calls `experiment.start` and
+`experiment.measure`:
+
+1. Take a starting image and six small orthogonal barrier probes to identify the
+   local plunger response.
+2. Track the shared stick geometry between adjacent scans using a bounded
+   cross-correlation of row-corrected edge maps. Ambiguous registrations trigger
+   a repeated frame and averaging. A robust linear model is fit first; a
+   regularized quadratic model is enabled when the observations span it.
+3. Explore the default `[-0.5, 0.5]^3` barrier cube with 48 scrambled Sobol
+   points, routed in nearest-neighbour order. Intermediate moves are also scored
+   and are limited to 0.08 V per barrier, so the image remains trackable while
+   `g2/g4` are recentered from measurements.
+4. Refine two spatially separated high-scoring starts by coordinate pattern
+   search (±0.08, 0.04, 0.02, then 0.01 V). Local comparisons average two
+   frames; the returned point is confirmed with three more frames.
+
+The objective is the largest gain-corrected, detector-derived stick amplitude in
+a full-resolution CSD frame. This matches the challenge's maximum-contrast
+definition and avoids both scene-wide dilution and the pixel-area bias in a raw
+matched-filter response.
+
+### Run the solutions
+
+```bash
+# Reproducible held-out detector data. Do not reuse the test seed for tuning.
+uv run python starter/stage1_detection/generate_data.py --n 100 --out data/val  --seed 999
+uv run python starter/stage1_detection/generate_data.py --n 120 --out data/test --seed 2026
+uv run python -m solutions.evaluate_detection --dataset data/test
+
+# One deterministic optimization run; no reveal() call is made by the optimizer.
+uv run python - <<'PY'
+from csd import new_experiment
+from solutions.optimization import ContrastOptimizer
+
+exp = new_experiment(seed=0)
+result = ContrastOptimizer(seed=0).optimize(exp)
+print("working point:", result.working_point)
+print("image-derived score:", result.score)
+print("measurements / pixels:", result.n_measurements, result.n_pixels)
+PY
+
+# Multi-device post-run self-check (reveal is called only after optimize returns).
+uv run python -m solutions.evaluate_optimization \
+  --count 10 --start-seed 0 --optimizer-seed 0 \
+  --global-samples 48 --csv results/optimization_benchmark.csv
+```
+
+Generated `.npy` datasets stay under the ignored `data/` directory. The detector
+is analytic, not trained, so the validation split is used only to choose the
+segmentation threshold; the seed-2026 test split is held out. The benchmark's
+oracle measurements and calls to `reveal()` are separate post-run self-checks,
+never inputs to the optimizer, and are not included in its pixel budget.
+
+### Reproducible results
+
+On 120 held-out images generated with seed `2026` (threshold fixed at `4.0` using
+100 validation images, seed `999`):
+
+| Metric | Result |
+|---|---:|
+| Macro pixel precision / recall | 0.640 / 0.918 |
+| Macro pixel F1 / IoU | **0.746 / 0.608** |
+| Micro pixel precision / recall | 0.644 / 0.921 |
+| Micro pixel F1 / IoU | 0.758 / 0.610 |
+| 8-connected object precision / recall | 0.718 / 0.931 |
+
+Pixel accuracy is intentionally omitted because the positive class occupies
+well under 1% of the pixels. The object metric counts a target stick as found
+when any predicted foreground overlaps its 8-connected component.
+
+For stage 2, the checked-in `results/optimization_benchmark.csv` contains 10
+fresh devices (seeds 0–9), all using optimizer seed 0 and the default budget.
+The metric is the repeated, detector-derived contrast score at the returned
+point divided by the same score measured at the revealed optimum **after** the
+optimizer has finished. The mean ratio was **0.874**, the median **0.857**, and
+the minimum **0.745**. The median search used **334.5 measurements** and
+**7,526,250 integrated pixels** (range: 325–397 measurements). The initial
+working point had a median score ratio of 0.150. A noisy measured ratio can
+occasionally exceed 1; it is a self-check on an image-derived proxy, not a claim
+that physical contrast exceeds the hidden maximum.
+
+See `assets/detection_example.png` and `assets/optimization_benchmark.png` for
+the held-out detector overlay and ten-device optimization plot. `slides.pptx`
+and `slides.md` provide the 10-minute presentation and speaker notes. To
+regenerate the editable deck, activate the project environment, install the
+optional `python-pptx` generator dependency, and run
+`python presentation/create_slides.py`.
+
+### Limitations and next steps
+
+- The detector assumes the known baseline stick scale and near-45-degree
+  orientation. A real deployment should estimate these from a small calibration
+  set or widen the bank if device geometry changes. Short connector segments and
+  exceptionally weak sticks remain its main false-positive/false-negative modes.
+- Gain correction reduces, but does not eliminate, shape-dependent selection
+  bias in the strongest-stick score. A calibrated local contrast-to-noise
+  estimator with uncertainty would make fine tuning more reliable.
+- Image registration can become ambiguous if all sticks are near the noise
+  floor or move outside the scan. The optimizer detects low-confidence matches
+  and repeats them, but it still depends on locally trackable geometry and uses
+  a smooth linear/quadratic drift approximation.
+- The optimizer is robust but not perfect: a ten-device median score ratio of
+  0.857 leaves room for a more sample-efficient Bayesian or trust-region search,
+  multi-resolution overviews, and explicit uncertainty-aware stopping.
+
+---
+
 ## Repository layout
 
 ```
@@ -238,7 +370,19 @@ csd/                       # the engine — provided
 starter/                   # illustrative starting points — edit freely
   stage1_detection/        #   generate_data.py, explore_data.py
   stage2_optimization/     #   optimize.py, explore_simulator.py
-data/                      # your generated datasets land here
+solutions/                 # reference detector, optimizer, and evaluators
+  detection.py             #   matched-filter detector + pixel metrics
+  optimization.py          #   API-only drift tracking and contrast search
+  evaluate_detection.py    #   held-out mask and object metrics
+  evaluate_optimization.py #   post-run, reveal-based self-check
+assets/                    # figures used by README and slides
+results/                   # reproducible ten-device benchmark CSV
+presentation/              # editable-deck generation script
+  create_slides.py         #   rebuilds slides.pptx (requires python-pptx)
+tests/                     # focused unit and API-boundary tests
+data/                      # generated datasets (ignored by git)
+slides.pptx                # editable 10-minute presentation
+slides.md                  # slide text and speaker notes
 pyproject.toml
 ```
 

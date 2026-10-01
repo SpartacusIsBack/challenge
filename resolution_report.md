@@ -58,7 +58,7 @@ The default periodic filter requires at least four inliers and confidence at lea
 ## 1.4 Charge quantization and stick-slope constraint
 
 A fixed 45-degree assumption is not a general consequence of charge quantization. In a constant-interaction electrostatic model, electrochemical potentials depend on the dot occupations, charging energies, mutual charging energy, and gate-capacitance/lever-arm matrix. For example, in a two-plunger-coordinate notation:
-
+$$
 \[
 \mu_1=(N_1-\tfrac12)E_{C1}+N_2E_{Cm}
 -\frac{C_{g1}V_1E_{C1}+C_{g2}V_2E_{Cm}}{|e|},
@@ -67,24 +67,24 @@ A fixed 45-degree assumption is not a general consequence of charge quantization
 \mu_2=(N_2-\tfrac12)E_{C2}+N_1E_{Cm}
 -\frac{C_{g1}V_1E_{Cm}+C_{g2}V_2E_{C2}}{|e|}.
 \]
-
-For this convention, constant-\(\mu_1\) and constant-\(\mu_2\) boundaries have slopes
-
+$$
+For this convention, constant $-\(\mu_1\)$ and constant $-\(\mu_2\)$ boundaries have slopes
+$$
 \[
 \frac{dV_2}{dV_1}=-\frac{C_{g1}E_{C1}}{C_{g2}E_{Cm}},
 \qquad
 \frac{dV_2}{dV_1}=-\frac{C_{g1}E_{Cm}}{C_{g2}E_{C2}}.
 \]
-
-The interdot degeneracy condition is \(\mu_1-\mu_2=0\). Its direction depends on the capacitances and lever arms; it is not universally 45 degrees. Charge quantization creates stable charge domains and a honeycomb-like lattice, but an unlabeled grayscale lattice alone does not identify every charge-axis polarity or lever arm.
+$$
+The interdot degeneracy condition is $\(\mu_1-\mu_2=0\)$. Its direction depends on the capacitances and lever arms; it is not universally 45 degrees. Charge quantization creates stable charge domains and a honeycomb-like lattice, but an unlabeled grayscale lattice alone does not identify every charge-axis polarity or lever arm.
 
 The implemented image model represents the fitted charging lattice by a basis matrix \(B\) whose columns are the two inferred charge translations. It defines charge coordinates
-
+$$
 \[
 q= B^{-1}(V-V_0).
 \]
-
-A constant charge-transfer coordinate \(q_1-q_2\) has normal vector \(\nabla q_1-\nabla q_2\); the stick tangent is perpendicular to this normal. Because the image does not label the polarity of either charge axis, the fitter evaluates both relative-sign hypotheses. The formulas motivate the slope prior, but the code does **not** pretend that the lattice uniquely determines the true capacitance matrix.
+$$
+A constant charge-transfer coordinate $\(q_1-q_2\)$ has normal vector $\(\nabla q_1-\nabla q_2\)$; the stick tangent is perpendicular to this normal. Because the image does not label the polarity of either charge axis, the fitter evaluates both relative-sign hypotheses. The formulas motivate the slope prior, but the code does **not** pretend that the lattice uniquely determines the true capacitance matrix.
 
 ### Implementation of the wide-angle charge-slope method
 

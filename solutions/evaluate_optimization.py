@@ -126,7 +126,7 @@ def main() -> None:
     if args.csv is not None:
         args.csv.parent.mkdir(parents=True, exist_ok=True)
         with args.csv.open("w", newline="") as stream:
-            writer = csv.DictWriter(stream, fieldnames=list(rows[0]), lineterminator="\n")
+            writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
             writer.writeheader()
             writer.writerows(rows)
         print(f"wrote {args.csv}")
